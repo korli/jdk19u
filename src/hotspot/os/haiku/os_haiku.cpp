@@ -384,7 +384,7 @@ bool os::create_thread(Thread* thread, ThreadType thr_type,
   assert(thread->osthread() == NULL, "caller responsible");
 
   // Allocate the OSThread object
-  OSThread* osthread = new OSThread(NULL, NULL);
+  OSThread* osthread = new OSThread();
   if (osthread == NULL) {
     return false;
   }
@@ -479,7 +479,7 @@ bool os::create_attached_thread(JavaThread* thread) {
 #endif
 
   // Allocate the OSThread object
-  OSThread* osthread = new OSThread(NULL, NULL);
+  OSThread* osthread = new OSThread();
 
   if (osthread == NULL) {
     return false;
@@ -1385,7 +1385,7 @@ jint os::init_2(void) {
   }
 
   // Check and sets minimum stack sizes against command line options
-  if (Posix::set_minimum_stack_sizes() == JNI_ERR) {
+  if (os::set_minimum_stack_sizes() == JNI_ERR) {
     return JNI_ERR;
   }
 
