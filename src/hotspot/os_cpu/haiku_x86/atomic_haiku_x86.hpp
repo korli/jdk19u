@@ -66,17 +66,6 @@ inline T Atomic::PlatformXchg<4>::operator()(T volatile* dest,
 }
 
 template<>
-struct Atomic::CmpxchgImpl<long unsigned int, long unsigned int, long long unsigned int> {
-  long unsigned int operator()(long unsigned int volatile* dest,
-                               long unsigned int compare_value,
-                               long long unsigned int exchange_value,
-                               atomic_memory_order order) const {
-    STATIC_ASSERT(sizeof(long unsigned int) == sizeof(long long unsigned int));
-    return Atomic::PlatformCmpxchg<sizeof(long unsigned int)>()(dest, compare_value, exchange_value, order);
-  }
-};
-
-template<>
 template<typename T>
 inline T Atomic::PlatformCmpxchg<1>::operator()(T volatile* dest,
                                                 T compare_value,

@@ -150,6 +150,11 @@ public:
   // value of *dest. cmpxchg*() provide:
   // <fence> compare-and-exchange <membar StoreLoad|StoreStore>
 
+  /*
+  (threshold == Atomic::cmpxchg(&_threshold, threshold, SIZE_MAX))) ||
+
+   */
+
   template<typename D, typename U, typename T>
   inline static D cmpxchg(D volatile* dest,
                           U compare_value,
@@ -282,17 +287,18 @@ private:
   // checking and limited conversions around calls to the
   // platform-specific implementation layer provided by
   // PlatformCmpxchg.
-//  template<typename D, typename U, typename T, typename Enable = void>
-//  struct CmpxchgImpl;
+  template<typename D, typename U, typename T, typename Enable = void>
+  struct CmpxchgImpl;
 
+  // Specialization for long unsigned int, long unsigned int, long long unsigned int
   template<>
-  struct CmpxchgImpl<long unsigned int, long unsigned int, long long unsigned int> {
+    struct CmpxchgImpl<long unsigned int, long unsigned int, long long unsigned int, void> {
     long unsigned int operator()(long unsigned int volatile* dest,
                                  long unsigned int compare_value,
                                  long long unsigned int exchange_value,
                                  atomic_memory_order order) const {
       STATIC_ASSERT(sizeof(long unsigned int) == sizeof(long long unsigned int));
-      return Atomic::PlatformCmpxchg<sizeof(long unsigned int)>()(dest, compare_value, exchange_value, order);
+      return PlatformCmpxchg<8>()(dest, compare_value, exchange_value, order);
     }
   };
 
