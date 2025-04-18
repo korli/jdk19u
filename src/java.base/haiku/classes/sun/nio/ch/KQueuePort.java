@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,20 +30,27 @@ import java.io.IOException;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
-import static sun.nio.ch.HQueue.*;
+
+import static sun.nio.ch.KQueue.EVFILT_READ;
+import static sun.nio.ch.KQueue.EVFILT_WRITE;
+import static sun.nio.ch.KQueue.EV_ADD;
+import static sun.nio.ch.KQueue.EV_ONESHOT;
 
 /**
- * AsynchronousChannelGroup implementation based on the Haiku wait_for_objects facility.
+ * AsynchronousChannelGroup implementation based on the BSD kqueue facility.
  */
 
-final class HQueuePort
+final class KQueuePort
     extends Port
 {
     // maximum number of events to poll at a time
-    private static final int MAX_HEVENTS_TO_POLL = 512;
+    private static final int MAX_KEVENTS_TO_POLL = 512;
 
-    // array of fds to read;
-    private final int fds[];
+    // kqueue file descriptor
+    private final int kqfd;
+
+    // address of the poll array passed to kqueue_wait
+    private final long address;
 
     // true if kqueue closed
     private boolean closed;
@@ -53,9 +60,6 @@ final class HQueuePort
 
     // number of wakeups pending
     private final AtomicInteger wakeupCount = new AtomicInteger();
-
-    // address of the poll array passed to wait_for_objects
-    private final long address;
 
     // encapsulates an event for a channel
     static class Event {
@@ -77,39 +81,34 @@ final class HQueuePort
     private final Event NEED_TO_POLL = new Event(null, 0);
     private final Event EXECUTE_TASK_OR_SHUTDOWN = new Event(null, 0);
 
-    HQueuePort(AsynchronousChannelProvider provider, ThreadPool pool)
+    KQueuePort(AsynchronousChannelProvider provider, ThreadPool pool)
         throws IOException
     {
         super(provider, pool);
 
+        this.kqfd = KQueue.create();
+        this.address = KQueue.allocatePollArray(MAX_KEVENTS_TO_POLL);
+
         // create socket pair for wakeup mechanism
-        int[] sv = new int[2];
         try {
-            socketpair(sv);
-
-        } catch (IOException x) {
-            throw x;
+            long fds = IOUtil.makePipe(true);
+            this.sp = new int[]{(int) (fds >>> 32), (int) fds};
+        } catch (IOException ioe) {
+            KQueue.freePollArray(address);
+            FileDispatcherImpl.closeIntFD(kqfd);
+            throw ioe;
         }
-        this.sp = sv;
 
-        // allocate the poll array
-        this.address = allocatePollArray(MAX_HEVENTS_TO_POLL + 1);
-        long heventAddress = getEvent(address, 0);
-        setDescriptor(heventAddress, sv[0]);
-        setType(heventAddress, TYPE_FD);
-        setEvents(heventAddress, EVENT_PRIORITY_READ);
-
-        this.fds = new int[MAX_HEVENTS_TO_POLL];
-		for (int i = 0; i < MAX_HEVENTS_TO_POLL; i++)
-            this.fds[i] = -1;
+        // register one end with kqueue
+        KQueue.register(kqfd, sp[0], EVFILT_READ, EV_ADD);
 
         // create the queue and offer the special event to ensure that the first
         // threads polls
-        this.queue = new ArrayBlockingQueue<Event>(MAX_HEVENTS_TO_POLL);
+        this.queue = new ArrayBlockingQueue<>(MAX_KEVENTS_TO_POLL);
         this.queue.offer(NEED_TO_POLL);
     }
 
-    HQueuePort start() {
+    KQueuePort start() {
         startThreads(new EventHandlerTask());
         return this;
     }
@@ -123,16 +122,18 @@ final class HQueuePort
                 return;
             closed = true;
         }
-        freePollArray(address);
-        close0(sp[0]);
-        close0(sp[1]);
+
+        try { FileDispatcherImpl.closeIntFD(kqfd); } catch (IOException ioe) { }
+        try { FileDispatcherImpl.closeIntFD(sp[0]); } catch (IOException ioe) { }
+        try { FileDispatcherImpl.closeIntFD(sp[1]); } catch (IOException ioe) { }
+        KQueue.freePollArray(address);
     }
 
     private void wakeup() {
         if (wakeupCount.incrementAndGet() == 1) {
             // write byte to socketpair to force wakeup
             try {
-                interrupt(sp[1]);
+                IOUtil.write1(sp[1], (byte)0);
             } catch (IOException x) {
                 throw new AssertionError(x);
             }
@@ -159,7 +160,7 @@ final class HQueuePort
         if (nThreads == 0) {
             implClose();
         } else {
-            // send interrupt to each thread
+            // send wakeup to each thread
             while (nThreads-- > 0) {
                 wakeup();
             }
@@ -169,20 +170,23 @@ final class HQueuePort
     // invoked by clients to register a file descriptor
     @Override
     void startPoll(int fd, int events) {
-        for (int i = 0; i < MAX_HEVENTS_TO_POLL; i++) {
-            if (this.fds[i] == -1) {
-                this.fds[i] = fd;
-                wakeup();
-                break;
-            }
-        }
+        // We use a separate filter for read and write events.
+        // TBD: Measure cost of EV_ONESHOT vs. EV_CLEAR, either will do here.
+        int err = 0;
+        int flags = (EV_ADD|EV_ONESHOT);
+        if ((events & Net.POLLIN) > 0)
+            err = KQueue.register(kqfd, fd, EVFILT_READ, flags);
+        if (err == 0 && (events & Net.POLLOUT) > 0)
+            err = KQueue.register(kqfd, fd, EVFILT_WRITE, flags);
+        if (err != 0)
+            throw new InternalError("kevent failed: " + err);  // should not happen
     }
 
-    /*
-     * Task to wait and process events from hqueue and dispatch to the channel's
+    /**
+     * Task to process events from kqueue and dispatch to the channel's
      * onEvent handler.
      *
-     * Events are read and offered to a BlockingQueue
+     * Events are retrieved from kqueue in batch and offered to a BlockingQueue
      * where they are consumed by handler threads. A special "NEED_TO_POLL"
      * event is used to signal one consumer to re-poll when all events have
      * been consumed.
@@ -191,19 +195,12 @@ final class HQueuePort
         private Event poll() throws IOException {
             try {
                 for (;;) {
-                    int n = 1;
-			        for (int i = 0; i < MAX_HEVENTS_TO_POLL; i++) {
-                        int fd = fds[i];
-                        if (fd != -1) {
-                            long heventAddress = getEvent(address, n++);
-                            setDescriptor(heventAddress, fd);
-                            setType(heventAddress, TYPE_FD);
-                            setEvents(heventAddress, EVENT_READ);
-                        }
-                    }
+                    int n;
+                    do {
+                        n = KQueue.poll(kqfd, address, MAX_KEVENTS_TO_POLL, -1L);
+                    } while (n == IOStatus.INTERRUPTED);
 
-                    heventPoll(address, n);
-                    /*
+                    /**
                      * 'n' events have been read. Here we map them to their
                      * corresponding channel in batch and queue n-1 so that
                      * they can be handled by other handler threads. The last
@@ -211,15 +208,20 @@ final class HQueuePort
                      */
                     fdToChannelLock.readLock().lock();
                     try {
-                        for (; n > 0; n--) {
-                            long heventAddress = getEvent(address, n);
-                            int fd = getDescriptor(heventAddress);
+                        while (n-- > 0) {
+                            long keventAddress = KQueue.getEvent(address, n);
+                            int fd = KQueue.getDescriptor(keventAddress);
 
                             // wakeup
                             if (fd == sp[0]) {
                                 if (wakeupCount.decrementAndGet() == 0) {
-                                    // no more wakeups so drain pipe
-                                    drain1(sp[0]);
+                                    // consume one wakeup byte, never more as this
+                                    // would interfere with shutdown when there is
+                                    // a wakeup byte queued to wake each thread
+                                    int nread;
+                                    do {
+                                        nread = IOUtil.drain1(sp[0]);
+                                    } while (nread == IOStatus.INTERRUPTED);
                                 }
 
                                 // queue special event if there are more events
@@ -231,19 +233,13 @@ final class HQueuePort
                                 return EXECUTE_TASK_OR_SHUTDOWN;
                             }
 
-                            for (int i = 0; i < MAX_HEVENTS_TO_POLL; i++) {
-                                if (fd == fds[i]) {
-                                    fds[i] = -1;
-                                    break;
-                                }
-                            }
                             PollableChannel channel = fdToChannel.get(fd);
                             if (channel != null) {
-                                int event = getEvents(heventAddress);
+                                int filter = KQueue.getFilter(keventAddress);
                                 int events = 0;
-                                if (event == EVENT_READ)
+                                if (filter == EVFILT_READ)
                                     events = Net.POLLIN;
-                                else if (event == EVENT_WRITE)
+                                else if (filter == EVFILT_WRITE)
                                     events = Net.POLLOUT;
 
                                 Event ev = new Event(channel, events);
@@ -314,10 +310,9 @@ final class HQueuePort
                     // process event
                     try {
                         ev.channel().onEvent(ev.events(), isPooledThread);
-                    } catch (Error x) {
-                        replaceMe = true; throw x;
-                    } catch (RuntimeException x) {
-                        replaceMe = true; throw x;
+                    } catch (Error | RuntimeException x) {
+                        replaceMe = true;
+                        throw x;
                     }
                 }
             } finally {
@@ -328,19 +323,5 @@ final class HQueuePort
                 }
             }
         }
-    }
-
-    // -- Native methods --
-
-    private static native void socketpair(int[] sv) throws IOException;
-
-    private static native void interrupt(int fd) throws IOException;
-
-    private static native void drain1(int fd) throws IOException;
-
-    private static native void close0(int fd);
-
-    static {
-        IOUtil.load();
     }
 }

@@ -34,13 +34,13 @@ import java.io.IOException;
 public class HaikuAsynchronousChannelProvider
     extends AsynchronousChannelProvider
 {
-    private static volatile HQueuePort defaultPort;
+    private static volatile KQueuePort defaultPort;
 
-    private HQueuePort defaultEventPort() throws IOException {
+    private KQueuePort defaultEventPort() throws IOException {
         if (defaultPort == null) {
             synchronized (HaikuAsynchronousChannelProvider.class) {
                 if (defaultPort == null) {
-                    defaultPort = new HQueuePort(this, ThreadPool.getDefault()).start();
+                    defaultPort = new KQueuePort(this, ThreadPool.getDefault()).start();
                 }
             }
         }
@@ -54,21 +54,21 @@ public class HaikuAsynchronousChannelProvider
     public AsynchronousChannelGroup openAsynchronousChannelGroup(int nThreads, ThreadFactory factory)
         throws IOException
     {
-        return new HQueuePort(this, ThreadPool.create(nThreads, factory)).start();
+        return new KQueuePort(this, ThreadPool.create(nThreads, factory)).start();
     }
 
     @Override
     public AsynchronousChannelGroup openAsynchronousChannelGroup(ExecutorService executor, int initialSize)
         throws IOException
     {
-        return new HQueuePort(this, ThreadPool.wrap(executor, initialSize)).start();
+        return new KQueuePort(this, ThreadPool.wrap(executor, initialSize)).start();
     }
 
     private Port toPort(AsynchronousChannelGroup group) throws IOException {
         if (group == null) {
             return defaultEventPort();
         } else {
-            if (!(group instanceof HQueuePort))
+            if (!(group instanceof KQueuePort))
                 throw new IllegalChannelGroupException();
             return (Port)group;
         }
