@@ -129,7 +129,13 @@ class HaikuUserDefinedFileAttributeView
         } finally {
             if (buffer != null)
                 buffer.release();
-            close(fd);
+            try {
+                close(fd);
+            } catch (UnixException e) {
+                throw new FileSystemException(file.getPathForExceptionMessage(),
+                        null, "Unable to get list of extended attributes: " +
+                        e.getMessage());
+            }
         }
     }
 
@@ -152,7 +158,13 @@ class HaikuUserDefinedFileAttributeView
                 null, "Unable to get size of extended attribute '" + name +
                 "': " + x.getMessage());
         } finally {
-            close(fd);
+            try {
+                close(fd);
+            } catch (UnixException e) {
+                throw new FileSystemException(file.getPathForExceptionMessage(),
+                        null, "Unable to get list of extended attributes: " +
+                        e.getMessage());
+            }
         }
     }
 
@@ -209,7 +221,13 @@ class HaikuUserDefinedFileAttributeView
                 throw new FileSystemException(file.getPathForExceptionMessage(),
                     null, "Error reading extended attribute '" + name + "': " + msg);
             } finally {
-                close(fd);
+                try {
+                    close(fd);
+                } catch (UnixException e) {
+                    throw new FileSystemException(file.getPathForExceptionMessage(),
+                            null, "Unable to get list of extended attributes: " +
+                            e.getMessage());
+                }
             }
         } finally {
             if (nb != null)
@@ -267,7 +285,13 @@ class HaikuUserDefinedFileAttributeView
                     null, "Error writing extended attribute '" + name + "': " +
                     x.getMessage());
             } finally {
-                close(fd);
+                try {
+                    close(fd);
+                } catch (UnixException e) {
+                    throw new FileSystemException(file.getPathForExceptionMessage(),
+                            null, "Unable to get list of extended attributes: " +
+                            e.getMessage());
+                }
             }
         } finally {
             if (nb != null)
@@ -292,7 +316,13 @@ class HaikuUserDefinedFileAttributeView
             throw new FileSystemException(file.getPathForExceptionMessage(),
                 null, "Unable to delete extended attribute '" + name + "': " + x.getMessage());
         } finally {
-            close(fd);
+            try {
+                close(fd);
+            } catch (UnixException e) {
+                throw new FileSystemException(file.getPathForExceptionMessage(),
+                        null, "Unable to get list of extended attributes: " +
+                        e.getMessage());
+            }
         }
     }
 
