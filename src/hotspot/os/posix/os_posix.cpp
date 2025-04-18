@@ -252,6 +252,7 @@ int os::create_file_for_heap(const char* dir) {
   return fd;
 }
 
+#ifndef __HAIKU__
 // Is a (classpath) directory empty?
 bool os::dir_is_empty(const char* path) {
   DIR *dir = NULL;
@@ -270,6 +271,7 @@ bool os::dir_is_empty(const char* path) {
   ::closedir(dir);
   return result;
 }
+#endif // __HAIKU__
 
 static char* reserve_mmapped_memory(size_t bytes, char* requested_addr) {
   char * addr;
