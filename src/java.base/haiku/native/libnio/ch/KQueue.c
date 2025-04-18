@@ -23,6 +23,7 @@
  * questions.
  */
 
+#define _BSD_SYS_EVENT_H_
 #include <sys/event.h>
 
 #include <strings.h>
