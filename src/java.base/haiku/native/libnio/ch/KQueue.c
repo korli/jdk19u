@@ -23,10 +23,11 @@
  * questions.
  */
 
+#include <sys/event.h>
+
 #include <strings.h>
 #include <sys/types.h>
-#include <compatibility/bsd/sys/event.h>
-#include <compatibility/bsd/sys/time.h>
+#include <sys/time.h>
 
 #include "jni.h"
 #include "jni_util.h"

@@ -84,7 +84,7 @@ $(eval $(call SetupJdkLibrary, BUILD_LIBNIO, \
     LIBS_aix := $(LIBDL), \
     LIBS_macosx := \
         -framework CoreFoundation -framework CoreServices, \
-    LIBS_haiku := -ljava -lnet -lnetwork -lgnu, \
+    LIBS_haiku := -ljava -lbsd -lnet -lnetwork -lgnu, \
     LIBS_windows := jvm.lib ws2_32.lib $(WIN_JAVA_LIB) \
         $(SUPPORT_OUTPUTDIR)/native/$(MODULE)/libnet/net.lib \
         advapi32.lib, \
