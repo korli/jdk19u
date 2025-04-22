@@ -167,10 +167,10 @@ void G1PrimaryConcurrentRefineThread::activate() {
   // maybe_deactivate, so also signal if stop requested.
   size_t threshold = Atomic::load(&_threshold);
   if (((threshold != SIZE_MAX) &&
-       (threshold == Atomic::cmpxchg(&_threshold, threshold, SIZE_MAX))) ||
+       (threshold == Atomic::cmpxchg(&_threshold, threshold, static_cast<size_t>(SIZE_MAX)))) ||
       should_terminate()) {
-    _notifier.signal();
-  }
+      _notifier.signal();
+    }
 }
 
 void G1PrimaryConcurrentRefineThread::notify(size_t num_cards) {
